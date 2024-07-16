@@ -1,4 +1,7 @@
 dataset_path: data
+model:
+  model_path: false
+  model_name: model_20240715095915_epoch9_finish
 seed: 42
 num_epoch: 100
 data_loader:
@@ -14,4 +17,4 @@ train:
   no_batch_norm: false
   initial_learning_rate: 0.01
   weight_decay: 0.0001
-  epochs: 10
+  epochs: 15

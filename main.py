@@ -1,4 +1,8 @@
 import torch
+import torchvision.transforms.functional as F
+from src.models.base import *
+
+import numpy as np
 import hydra
 from omegaconf import DictConfig
 from torch.utils.data import DataLoader
@@ -110,8 +114,20 @@ def main(args: DictConfig):
     # ------------------
     #       Model
     # ------------------
+    
     model = EVFlowNet(args.train).to(device)
-
+            
+    if args.model.model_path:
+        try:
+            model_path = f"checkpoints/{args.model.model_name}.pth"
+        except: # tryで例外が発生した場合
+            print('model read Error')
+        else: # tryで例外が発生しなかった場合
+            model.load_state_dict(torch.load(model_path, map_location=device))
+            print(f"model: checkpoints/{args.model.model_name}.pth ")
+    #else:
+    #    model = EVFlowNet(args.train).to(device)
+    
     # ------------------
     #   optimizer
     # ------------------
@@ -119,7 +135,14 @@ def main(args: DictConfig):
     # ------------------
     #   Start training
     # ------------------
-    model.train()
+    model.train()       # モデルをtrainモードにします
+
+    # Create the directory if it doesn't exist
+    if not os.path.exists('checkpoints'):
+        os.makedirs('checkpoints')
+        
+    current_time = time.strftime("%Y%m%d%H%M%S")
+        
     for epoch in range(args.train.epochs):
         total_loss = 0
         print("on epoch: {}".format(epoch+1))
@@ -127,22 +150,51 @@ def main(args: DictConfig):
             batch: Dict[str, Any]
             event_image = batch["event_volume"].to(device) # [B, 4, 480, 640]
             ground_truth_flow = batch["flow_gt"].to(device) # [B, 2, 480, 640]
-            flow = model(event_image) # [B, 2, 480, 640]
-            loss: torch.Tensor = compute_epe_error(flow, ground_truth_flow)
+            # 元のソースコード
+            # event_image = batch["event_volume"].to(device) # [B, 4, 480, 640]
+            # ground_truth_flow = batch["flow_gt"].to(device) # [B, 2, 480, 640]
+            # 複数受信
+            total_photometric_loss = 0.
+            flow_dict = model(event_image) # [B, 2, 480, 640]
+            
+            # for j in range(len(flow_dict)):
+            #     for image_num in range(ground_truth_flow.shape[0]):
+            #         flow = flow_dict["flow{}".format(j)][image_num]
+            #         height = flow.shape[1]
+            #         width = flow.shape[2]
+
+            #         ground_truth_flow_resize = F.to_tensor(F.resize(F.to_pil_image(ground_truth_flow[image_num].cpu()),
+            #                                                 [height, width])).cuda()
+            #     loss: torch.Tensor = compute_epe_error(flow_dict["flow{}".format(j)], ground_truth_flow_resize)
+            #     total_photometric_loss += loss  # .itemo() がいる？？ flowを変化させる？
+            
+            # -----------
+            loss: torch.Tensor = compute_epe_error(flow_dict["flow{}".format(len(flow_dict)-1)], ground_truth_flow)
+            total_photometric_loss += loss  # .itemo() がいる？？ flowを変化させる？
+            # loss: torch.Tensor = compute_epe_error(flow, ground_truth_flow)
+            
+            
             print(f"batch {i} loss: {loss.item()}")
+            print(f"batch {i} total_photometric_loss: {total_photometric_loss.item()}")
             optimizer.zero_grad()
-            loss.backward()
+            total_photometric_loss.backward()
+            # loss.backward()
             optimizer.step()
 
-            total_loss += loss.item()
+            total_loss += total_photometric_loss.item()
+            #total_loss += loss.item()
         print(f'Epoch {epoch+1}, Loss: {total_loss / len(train_data)}')
+        
+        model_path = f"checkpoints/model_{current_time}_epoch{epoch}.pth"
+        torch.save(model.state_dict(), model_path)
+        print(f"Model saved to {model_path}")
 
     # Create the directory if it doesn't exist
     if not os.path.exists('checkpoints'):
         os.makedirs('checkpoints')
     
     current_time = time.strftime("%Y%m%d%H%M%S")
-    model_path = f"checkpoints/model_{current_time}.pth"
+    model_path = f"checkpoints/model_{current_time}_epoch{epoch}_finish.pth"
     torch.save(model.state_dict(), model_path)
     print(f"Model saved to {model_path}")
 
@@ -150,15 +202,15 @@ def main(args: DictConfig):
     #   Start predicting
     # ------------------
     model.load_state_dict(torch.load(model_path, map_location=device))
-    model.eval()
+    model.eval()       # モデルをevaluationモードにします
     flow: torch.Tensor = torch.tensor([]).to(device)
     with torch.no_grad():
         print("start test")
         for batch in tqdm(test_data):
             batch: Dict[str, Any]
             event_image = batch["event_volume"].to(device)
-            batch_flow = model(event_image) # [1, 2, 480, 640]
-            flow = torch.cat((flow, batch_flow), dim=0)  # [N, 2, 480, 640]
+            batch_flow_dict = model(event_image) # [1, 2, 480, 640]
+            flow = torch.cat((flow, batch_flow_dict['flow3']), dim=0)  # [N, 2, 480, 640]
         print("test done")
     # ------------------
     #  save submission

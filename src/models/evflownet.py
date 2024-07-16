@@ -29,6 +29,8 @@ class EVFlowNet(nn.Module):
         self.decoder4 = upsample_conv2d_and_predict_flow(in_channels=2*_BASE_CHANNELS+2,
                         out_channels=int(_BASE_CHANNELS/2), do_batch_norm=not self._args.no_batch_norm)
 
+        self.flow_dict = {}
+
     def forward(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
         # encoder
         skip_connections = {}
@@ -62,8 +64,10 @@ class EVFlowNet(nn.Module):
         inputs, flow = self.decoder4(inputs)
         flow_dict['flow3'] = flow.clone()
 
-        return flow
-        
+        self.flow_dict = flow_dict
+
+        # return flow
+        return flow_dict        
 
 # if __name__ == "__main__":
 #     from config import configs
